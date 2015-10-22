@@ -1,15 +1,17 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 import sys
 import click
 from flowdock import Flowdock
 
+
 # This is the common endpoint for all commands. Handle common options here
 @click.group()
-@click.option('--debug', default=False, is_flag=True, help='Turn on debug ouptut')
+@click.option('--debug', default=False, is_flag=True,
+              help='Turn on debug ouptut')
 @click.option('--api_key', help='Flowdock API key for the user')
 @click.pass_obj
 def cli(obj, api_key, debug):
-    """Simple command line utility for managing Flowdock
+    """Simple command line utility for managing Flowdock users.
 
     The script needs a personal Flowdock API KEY to function. Get one from
     https://flowdock.com/account/tokens and give it to this script either as
@@ -28,79 +30,114 @@ def cli(obj, api_key, debug):
     if debug:
         click.echo("Got api key: {}".format(obj['APIKEY']))
 
-@click.command(short_help="List Flowdock organizations")
+
+@cli.command(short_help="List Flowdock organizations")
 @click.pass_obj
 def list_orgs(obj):
     """List flowdock organizations this user is part of."""
     click.echo("Getting organization list...")
     f = Flowdock(obj['APIKEY'], debug=obj['DEBUG'], print_function=click.echo)
-    orgs = f.get_organizations()
+    orgs = f.list_organizations()
     f.close()
     for org in orgs:
         print_org(org)
 
-@click.command(short_help="Find user from organisations")
+
+@cli.command(short_help="Find user from organisations")
 @click.argument('email')
 @click.pass_obj
 def find_user(obj, email):
-    """List the organizations the given user belongs to"""
+    """List the organizations the given user belongs to
+
+    This only lists the organizations both you and the given user are part of.
+    """
     click.echo("Listing the organizations {} belongs to".format(email))
     f = Flowdock(obj['APIKEY'], debug=obj['DEBUG'], print_function=click.echo)
     user_orgs = f.find_user_orgs(email)
-    if len(user_orgs == 0):
+    f.close()
+    if len(user_orgs) == 0:
         click.echo("User not found!")
     click.echo("User is part of the following Flowdock organizations:")
     for org in user_orgs:
         click.echo(org['name'])
 
 
-@click.command(short_help="Delete user")
+@cli.command(short_help="Delete user")
 @click.argument('email')
 @click.pass_obj
 def delete_user(obj, email,):
-    """Delete user with given EMAIL address from all Flowdock organizations."""
+    """Delete user with given EMAIL address from all Flowdock organizations.
+
+    The user is deleted only from organizations that you are admin of.
+    """
     click.echo("Deleting user {} from all organizations...".format(email))
     f = Flowdock(obj['APIKEY'], debug=obj['DEBUG'], print_function=click.echo)
-    orgs = f.find_user_orgs()
-    if len(orgs == 0):
+    orgs = f.find_user_orgs(email)
+    if len(orgs) == 0:
         click.echo("User not found!")
         return
     click.echo("User is part of the following Flowdock organizations:")
     for org in orgs:
         click.echo(org['name'])
     if click.confirm('Are you sure you want to delete user?'):
-        __delete_user_from_orgs(f, email, orgs)
+        _delete_user_from_orgs(f, email, orgs)
         click.echo('Done!')
+    f.close()
 
-def __delete_user_from_orgs(flowdock, email, orgs):
+
+def _delete_user_from_orgs(flowdock, email, orgs):
     # Get the user object related to the email address
     user = None
     for org_user in orgs[0]['users']:
         if org_user['email'] == email:
             user = org_user
     for org in orgs:
-        f.delete_user_from_org(user, org)
+        flowdock.delete_user_from_org(user, org)
 
 
-@click.command(short_help="List inactive users")
-@click.argument('--days', default=90)
+@cli.command(short_help="List inactive users")
+@click.option('--null', default=False, is_flag=True,
+              help="List users whose last login is unknown")
+@click.option('--days', default=90,
+              help='How many days since last login is considered inactive')
 @click.pass_obj
-def list_inactive(obj, days):
-    """Click users that have not signed in to any of your Flowdock organisations
-    during last DAYS days.
+def list_inactive(obj, days, null=False):
+    """List inacitve users.
+
+    WARNING! THIS IS NOT OFFICIALLY SUPPORTED BY FLOWDOCK API!
+
+    Users are considered if they haven't used the Flowdock organization during
+    last 90 days (customizable, see --days).
+
+    By passing option --null list users who have not been active at all or the
+    last time was before flowdock started collecting statistics.
     """
-    click.echo("Not implemented yet!")
+    click.secho("WARNING! This method is not supported by Flowdock!",
+                bold=True, fg='red')
+
+    if null:
+        click.echo("Listing users that have not been active at all")
+    else:
+        click.echo("Listing users who have not been active during last {} days"
+                   .format(days))
+
+    f = Flowdock(obj['APIKEY'], debug=obj['DEBUG'], print_function=click.echo)
+    orgs = f.list_organizations()
+    for org in orgs:
+        inactive = f.find_inactive_in_org(org['parameterized_name'], days, null)
+        if len(inactive) > 0:
+            click.echo(org['name'])
+            for user in inactive:
+                click.echo("    {}, {}".format(user['email'], user['accessed_at']))
+
+    f.close()
+
 
 def print_org(org):
     click.echo(
         'Name: {name}, parameterized name: {parameterized_name}, users: {user_len}'
         .format(user_len=len(org['users']), **org))
 
-# Add available commands to cli group
-cli.add_command(list_orgs)
-cli.add_command(find_user)
-cli.add_command(delete_user)
-cli.add_command(list_inactive)
 
 def main():
     """Start the cli interface.
@@ -109,5 +146,7 @@ def main():
     """
     cli(obj={}, auto_envvar_prefix='FLOWDOCK')
 
+
+# Allow running this file as standalone app without setuptools wrappers
 if __name__ == '__main__':
     main()
