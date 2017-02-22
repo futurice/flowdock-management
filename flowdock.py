@@ -45,7 +45,7 @@ class Flowdock(object):
     def user_in_org(email, org):
         """Chek if user is part of organization"""
         for user in org['users']:
-            if user['email'] == email:
+            if user['email'].lower() == email.lower():
                 return True
         return False
 
